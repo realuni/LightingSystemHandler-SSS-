@@ -1,0 +1,427 @@
+-- THIS SCRIPT HANDLES THE LIGHTING SYSTEM ONLY, AND WE ARE FOCUSING ON THAT, BUT THERE ARE MORE SYSTEMS THAT I HAVE ALSO MADE.
+
+local LightingFolder = workspace:WaitForChild("Lighting")
+local waveDelay = 0.3
+
+local pressCooldown = 5
+local toggleDelay = 0.5
+
+local displayColors = {
+	On = Color3.fromRGB(169, 168, 171),
+	Off = Color3.fromRGB(53, 53, 54),
+}
+
+local segmentColors = {
+	On = Color3.fromRGB(172, 84, 84),
+	Off = Color3.fromRGB(0, 0, 0),
+}
+
+local switchStates = {}
+
+local digitSegments = {
+	["0"] = {1, 2, 3, 4, 5, 6},
+	["1"] = {2, 3},
+	["2"] = {1, 2, 4, 5, 7},
+	["3"] = {1, 2, 3, 4, 7},
+	["4"] = {2, 3, 6, 7},
+	["5"] = {1, 3, 4, 6, 7},
+	["6"] = {3, 4, 5, 6, 7},
+	["7"] = {1, 2, 3},
+	["8"] = {1, 2, 3, 4, 5, 6, 7},
+	["9"] = {1, 2, 3, 6, 7},
+	[" "] = {},  -- blank digit (all segments off)
+}
+
+local lastPowerStr = "      "  -- 6 spaces (blank digits initially)
+
+-- Helper: Animate a single digit
+local function animateDigit(digitModel, oldChar, newChar, stepDelay)
+	if oldChar == newChar then
+		return
+	end
+
+	local oldSegments = digitSegments[oldChar] or {}
+	local newSegments = digitSegments[newChar] or {}
+
+	local maxSteps = 3
+	for step = 1, maxSteps do
+		for i = 1, 7 do
+			local part = digitModel:FindFirstChild(tostring(i))
+			if part and part:IsA("BasePart") then
+				local inOld = table.find(oldSegments, i) ~= nil
+				local inNew = table.find(newSegments, i) ~= nil
+
+				if inOld and not inNew then
+					part.Color = step < maxSteps and segmentColors.On or segmentColors.Off
+				elseif not inOld and inNew then
+					part.Color = step == maxSteps and segmentColors.On or segmentColors.Off
+				elseif inOld and inNew then
+					part.Color = segmentColors.On
+				else
+					part.Color = segmentColors.Off
+				end
+			end
+		end
+		task.wait(stepDelay)
+	end
+end
+
+-- Update a digit immediately (without animation)
+local function updateDisplayDigit(digitModel, digitChar)
+	local segmentsToTurnOn = digitSegments[digitChar] or {}
+
+	for i = 1, 7 do
+		local part = digitModel:FindFirstChild(tostring(i))
+		if part and part:IsA("BasePart") then
+			if table.find(segmentsToTurnOn, i) then
+				part.Color = segmentColors.On
+			else
+				part.Color = segmentColors.Off
+			end
+		end
+	end
+end
+
+-- Calculate total power usage
+local function calculatePowerUsage()
+	local totalPower = 0
+	for _, folder in pairs(LightingFolder:GetChildren()) do
+		if folder:IsA("Folder") and (folder.Name == "Lights" or folder.Name == "Lights2") then
+			for _, part in pairs(folder:GetChildren()) do
+				if part:IsA("BasePart") and part.Name:match("^Part[1-4]$") then
+					if part.Color == displayColors.On then
+						totalPower = totalPower + 15
+					end
+				end
+			end
+		end
+	end
+	return totalPower
+end
+
+-- Find all power usage display folders by name pattern
+local function getAllPowerDisplays()
+	local displays = {}
+	for _, folder in pairs(LightingFolder:GetChildren()) do
+		if folder:IsA("Folder") and folder.Name:match("^PowerUsageDisplay%d*$") then
+			table.insert(displays, folder)
+		end
+	end
+	return displays
+end
+
+-- Update all displays with animation
+local function updatePowerDisplaysAnimated(newPowerValue)
+	local strValue = tostring(newPowerValue)
+	strValue = string.rep("0", 6 - #strValue) .. strValue
+
+	local nonZeroFound = false
+
+	local displays = getAllPowerDisplays()
+
+	for i = 1, 6 do
+		local char = strValue:sub(i, i)
+		if char ~= "0" then
+			nonZeroFound = true
+		end
+
+		local displayChar = char
+		if not nonZeroFound and char == "0" then
+			displayChar = " "  -- leading zero as blank
+		end
+
+		for _, folder in ipairs(displays) do
+			local digitModel = folder:FindFirstChild("Number" .. i)
+			if digitModel then
+				local baseDelay = 0.1
+				local delayPerStep = baseDelay * ((7 - i) / 6)
+
+				local oldDigitChar = lastPowerStr:sub(i, i)
+				local newDigitChar = displayChar
+
+				task.spawn(function()
+					animateDigit(digitModel, oldDigitChar, newDigitChar, delayPerStep)
+				end)
+			end
+		end
+	end
+
+	-- Update lastPowerStr with blanks for leading zeros again
+	lastPowerStr = ""
+	nonZeroFound = false
+	for i = 1, 6 do
+		local char = strValue:sub(i,i)
+		if not nonZeroFound and char == "0" then
+			lastPowerStr = lastPowerStr .. " "
+		else
+			lastPowerStr = lastPowerStr .. char
+			nonZeroFound = true
+		end
+	end
+end
+
+-- Update all displays instantly (no animation, used on init)
+local function updatePowerDisplaysInstant(newPowerValue)
+	local strValue = tostring(newPowerValue)
+	strValue = string.rep("0", 6 - #strValue) .. strValue
+
+	local nonZeroFound = false
+
+	local displays = getAllPowerDisplays()
+
+	for i = 1, 6 do
+		local char = strValue:sub(i, i)
+		if char ~= "0" then
+			nonZeroFound = true
+		end
+
+		local displayChar = char
+		if not nonZeroFound and char == "0" then
+			displayChar = " "  -- leading zero as blank
+		end
+
+		for _, folder in ipairs(displays) do
+			local digitModel = folder:FindFirstChild("Number" .. i)
+			if digitModel then
+				updateDisplayDigit(digitModel, displayChar)
+			end
+		end
+	end
+
+	-- Update lastPowerStr similarly
+	lastPowerStr = ""
+	nonZeroFound = false
+	for i = 1, 6 do
+		local char = strValue:sub(i,i)
+		if not nonZeroFound and char == "0" then
+			lastPowerStr = lastPowerStr .. " "
+		else
+			lastPowerStr = lastPowerStr .. char
+			nonZeroFound = true
+		end
+	end
+end
+
+-- Wrapper to update power usage and displays with animation
+local function updatePowerUsage()
+	local power = calculatePowerUsage()
+	-- No print here as requested
+	updatePowerDisplaysAnimated(power)
+end
+
+local function applyWave(folder, isOn, playSounds)
+	for i = 1, 4 do
+		for _, displayPart in pairs(folder:GetChildren()) do
+			if displayPart.Name == ("Part" .. i) then
+				displayPart.Color = isOn and displayColors.On or displayColors.Off
+				if playSounds then
+					local sound = displayPart:FindFirstChild(isOn and "OnSound" or "OffSound")
+					if sound and sound:IsA("Sound") then
+						sound:Play()
+					end
+				end
+				updatePowerUsage()
+			end
+		end
+		for _, lightPart in pairs(folder:GetChildren()) do
+			if lightPart.Name == tostring(i) then
+				local light = lightPart:FindFirstChildOfClass("PointLight")
+				if light then
+					light.Enabled = isOn
+				end
+				if playSounds then
+					local sound = lightPart:FindFirstChild(isOn and "OnSound" or "OffSound")
+					if sound and sound:IsA("Sound") then
+						sound:Play()
+					end
+				end
+			end
+		end
+		task.wait(waveDelay)
+	end
+end
+
+local function updateSwitchVisuals(switchModel, isOn)
+	local onPart = switchModel:FindFirstChild("On")
+	local offPart = switchModel:FindFirstChild("Off")
+
+	if onPart then onPart.Transparency = isOn and 0 or 1 end
+	if offPart then offPart.Transparency = isOn and 1 or 0 end
+end
+
+local function toggleSingleSwitch(switchModel)
+	local state = switchStates[switchModel]
+	if not state then return end
+
+	local now = tick()
+	if now - state.lastPress < pressCooldown then
+		return
+	end
+	state.lastPress = now
+
+	state.isOn = not state.isOn
+	updateSwitchVisuals(switchModel, state.isOn)
+
+	local switchPart = switchModel:FindFirstChild("Switch")
+	if switchPart then
+		local clickSound = switchPart:FindFirstChild("Click")
+		if clickSound then
+			clickSound:Play()
+		end
+	end
+
+	task.delay(toggleDelay, function()
+		local lightsFolder = switchModel.Parent
+		if lightsFolder and lightsFolder:IsA("Folder") then
+			applyWave(lightsFolder, state.isOn, true)
+		end
+	end)
+end
+
+local function toggleCentralSwitch(centralSwitchModel)
+	local state = switchStates[centralSwitchModel]
+	if not state then return end
+
+	local now = tick()
+	if now - state.lastPress < pressCooldown then
+		return
+	end
+	state.lastPress = now
+
+	local switchPart = centralSwitchModel:FindFirstChild("Switch")
+	if switchPart then
+		local clickSound = switchPart:FindFirstChild("Click")
+		if clickSound then
+			clickSound:Play()
+		end
+	end
+
+	local lightFolders = {}
+	for _, folder in pairs(LightingFolder:GetChildren()) do
+		if folder:IsA("Folder") and (folder.Name == "Lights" or folder.Name == "Lights2") then
+			table.insert(lightFolders, folder)
+		end
+	end
+
+	local targetState = false
+	for _, folder in pairs(lightFolders) do
+		local switchModel = folder:FindFirstChild("LightSwitch")
+		local folderState = switchStates[switchModel]
+		if folderState and not folderState.isOn then
+			targetState = true
+			break
+		end
+	end
+
+	state.isOn = targetState
+	updateSwitchVisuals(centralSwitchModel, targetState)
+
+	task.delay(toggleDelay, function()
+		for _, folder in pairs(lightFolders) do
+			local switchModel = folder:FindFirstChild("LightSwitch")
+			local folderState = switchStates[switchModel]
+			if folderState and folderState.isOn ~= targetState then
+				folderState.isOn = targetState
+				updateSwitchVisuals(switchModel, targetState)
+				applyWave(folder, targetState, true)
+			end
+		end
+	end)
+end
+
+local function initLightSwitches()
+	for _, folder in pairs(LightingFolder:GetChildren()) do
+		if folder:IsA("Folder") and (folder.Name == "Lights" or folder.Name == "Lights2") then
+			local switchModel = folder:FindFirstChild("LightSwitch")
+			if switchModel and switchModel:IsA("Model") then
+				local switchPart = switchModel:FindFirstChild("Switch")
+				local detector = switchPart and switchPart:FindFirstChildOfClass("ClickDetector")
+
+				if detector then
+					local startOn = (folder.Name == "Lights")
+
+					switchStates[switchModel] = {
+						isOn = startOn,
+						lastPress = 0,
+					}
+
+					updateSwitchVisuals(switchModel, startOn)
+
+					if startOn then
+						applyWave(folder, false, false)
+						task.wait(1)
+						applyWave(folder, true, true)
+						switchStates[switchModel].isOn = true
+						updateSwitchVisuals(switchModel, true)
+					else
+						applyWave(folder, false, false)
+					end
+
+					detector.MouseClick:Connect(function()
+						toggleSingleSwitch(switchModel)
+					end)
+				else
+					warn("Missing ClickDetector in LightSwitch.Switch in folder '" .. folder.Name .. "'")
+				end
+			else
+				warn("Missing LightSwitch model in folder '" .. folder.Name .. "'")
+			end
+		end
+	end
+
+	local centralSwitchModel = LightingFolder:FindFirstChild("CentralLightSwitch")
+	if centralSwitchModel and centralSwitchModel:IsA("Model") then
+		local switchPart = centralSwitchModel:FindFirstChild("Switch")
+		local detector = switchPart and switchPart:FindFirstChildOfClass("ClickDetector")
+
+		if detector then
+			switchStates[centralSwitchModel] = {
+				isOn = false,
+				lastPress = 0,
+			}
+
+			updateSwitchVisuals(centralSwitchModel, false)
+
+			detector.MouseClick:Connect(function()
+				toggleCentralSwitch(centralSwitchModel)
+			end)
+		else
+			warn("Missing ClickDetector in CentralLightSwitch.Switch")
+		end
+	else
+		warn("Missing CentralLightSwitch model")
+	end
+
+	-- Update power usage initially after startup wave completes
+	local power = calculatePowerUsage()
+	updatePowerDisplaysInstant(power)
+end
+
+task.delay(1, initLightSwitches)
+
+-- 1. Declare these at the top of your script (near your other variables):
+local centralSwitchCooldown = 300 -- 300 seconds cooldown for CentralLightSwitch
+local centralSwitchLastPressed = 0 -- to store last pressed timestamp
+
+-- 2. Insert this cooldown check inside your existing switch press handler function,
+-- near the start of the function, before any toggle logic runs.
+
+-- Example function name and parameter here; replace "switchModel" with your actual variable if named differently
+local function onSwitchPressed(switchModel)
+	if switchModel.Name == "CentralLightSwitch" then
+		local now = tick()
+		if now - centralSwitchLastPressed < centralSwitchCooldown then
+			print("CentralLightSwitch is on cooldown. Please wait.")
+			return -- block spamming during cooldown
+		else
+			centralSwitchLastPressed = now -- update last press time
+		end
+	end
+
+	-- *** Your existing switch toggle logic goes here unchanged ***
+end
+
+task.delay(1, initLightSwitches)
+-- Note:
+-- You only need to add that snippet inside the function that handles switch presses,
+-- keeping the rest of your original script fully intact.
